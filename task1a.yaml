@@ -73,7 +73,7 @@ defaults:
     active_fold_list: !!null                # List of active folds
 
   path:
-    dataset: datasets/
+    dataset: /home/skacprza/storage/dcase20
     log: log/
     application:
       base: system/task1a
@@ -98,6 +98,10 @@ defaults:
   feature_extractor:
     method: openl3
     fs: 44100
+    modify: true
+    param_suffix: ''
+    precomputed_path: /home/skacprza/storage/dcase20/TAU-urban-acoustic-scenes-2020-mobile-development/features_openl3
+    #/home/skacprza/pycharm_sync/dcase20/dcase2020_task1_baseline/system/task1a/features/feature_extractor_f88ca75e3128cb6ff89821b7dc12edbf
 
   feature_extractor_method_parameters:
     openl3:

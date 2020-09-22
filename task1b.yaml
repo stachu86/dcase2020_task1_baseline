@@ -125,7 +125,7 @@ defaults:
     active_fold_list: !!null                # List of active folds
 
   path:
-    dataset: datasets/
+    dataset: /home/skacprza/storage/dcase20
     log: log/
     application:
       base: system/task1b

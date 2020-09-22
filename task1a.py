@@ -17,7 +17,6 @@ from utils import *
 __version_info__ = ('1', '0', '0')
 __version__ = '.'.join(__version_info__)
 
-
 def main(argv):
     # Read application default parameter file
     parameters = dcase_util.containers.DictContainer().load(
@@ -47,6 +46,20 @@ def main(argv):
     # parameters where injected from command line.
     param.process()
 
+    if args.dataset_path:
+        # Download only dataset if requested
+
+        # Make sure given path exists
+        dcase_util.utils.Path().create(
+            paths=args.dataset_path
+        )
+        # Get dataset and initialize
+        dcase_util.datasets.dataset_factory(
+            dataset_class_name=param.get_path('dataset.parameters.dataset'),
+            data_path=args.dataset_path,
+        ).initialize().log()
+        sys.exit(0)
+
     if args.parameter_set:
         # Check parameter set ids given as program arguments
         parameters_sets = args.parameter_set.split(',')
@@ -65,39 +78,6 @@ def main(argv):
 
     else:
         application_mode = 'dev'
-
-    if args.dataset_path:
-        # Download only dataset if requested
-
-        # Make sure given path exists
-        dcase_util.utils.Path().create(
-            paths=args.dataset_path
-        )
-
-        for parameter_set in parameters_sets:
-            # Set parameter set
-            param['active_set'] = parameter_set
-            param.update_parameter_set(parameter_set)
-
-            if application_mode == 'eval':
-                eval_parameter_set_id = param.active_set() + '_eval'
-                if not param.set_id_exists(eval_parameter_set_id):
-                    raise ValueError(
-                        'Parameter set id [{set_id}] not found for eval mode.'.format(
-                            set_id=eval_parameter_set_id
-                        )
-                    )
-
-                # Change active parameter set
-                param.update_parameter_set(eval_parameter_set_id)
-
-            # Get dataset and initialize
-            dcase_util.datasets.dataset_factory(
-                dataset_class_name=param.get_path('dataset.parameters.dataset'),
-                data_path=args.dataset_path,
-            ).initialize().log()
-
-        sys.exit(0)
 
     # Get overwrite flag
     if overwrite is None:
@@ -431,6 +411,14 @@ def do_feature_extraction(db, param, log, overwrite=False):
                 filename_extension='.cpickle'
             )
 
+            if param.get_path('feature_extractor.modify', False):
+                feature_filename = dcase_util.utils.Path(
+                    path=audio_filename
+                ).modify(
+                    path_base=param.get_path('feature_extractor.precomputed_path'),
+                    filename_extension=param.get_path('feature_extractor.param_suffix') + '.cpickle'
+                )
+
             if not os.path.isfile(feature_filename):
                 extraction_needed = True
                 break
@@ -462,7 +450,7 @@ def do_feature_extraction(db, param, log, overwrite=False):
             feature_filename = dcase_util.utils.Path(
                 path=audio_filename
             ).modify(
-                path_base=param.get_path('path.application.feature_extractor'),
+                path_base=param.get_path('feature_extractor.precomputed_path'),
                 filename_extension='.cpickle'
             )
 
@@ -550,8 +538,8 @@ def do_feature_normalization(db, folds, param, log, overwrite=False):
                 feature_filename = dcase_util.utils.Path(
                     path=item.filename
                 ).modify(
-                    path_base=param.get_path('path.application.feature_extractor'),
-                    filename_extension='.cpickle'
+                    path_base=param.get_path('feature_extractor.precomputed_path'),
+                    filename_extension=param.get_path('feature_extractor.param_suffix') + '.cpickle'
                 )
 
                 # Load feature matrix
@@ -676,8 +664,8 @@ def do_learning(db, folds, param, log, overwrite=False):
                 feature_filename = dcase_util.utils.Path(
                     path=item.filename
                 ).modify(
-                    path_base=param.get_path('path.application.feature_extractor'),
-                    filename_extension='.cpickle'
+                    path_base=param.get_path('feature_extractor.precomputed_path'),
+                    filename_extension=param.get_path('feature_extractor.param_suffix') + '.cpickle'
                 )
 
                 item_ = {
@@ -989,17 +977,14 @@ def do_testing(db, scene_labels, folds, param, log, overwrite=False):
                 filename=fold_results_filename
             )
 
-            if not len(db.test(fold=fold)):
-                raise ValueError('Dataset did not return any test files. Check dataset setup.')
-
             # Loop through all test files from the current cross-validation fold
             for item in db.test(fold=fold):
                 # Get feature filename
                 feature_filename = dcase_util.utils.Path(
                     path=item.filename
                 ).modify(
-                    path_base=param.get_path('path.application.feature_extractor'),
-                    filename_extension='.cpickle'
+                    path_base=param.get_path('feature_extractor.precomputed_path'),
+                    filename_extension=param.get_path('feature_extractor.param_suffix') + '.cpickle'
                 )
 
                 features = data_processing_chain.process(
@@ -1044,7 +1029,7 @@ def do_testing(db, scene_labels, folds, param, log, overwrite=False):
                     frame_decisions=frame_decisions
                 )
 
-                # Collect class wise probabilities and scale them between [0-1]
+                # Collect class wise probabilities and scale them betweem [0-1]
                 class_probabilities = {}
                 for scene_id, scene_label in enumerate(scene_labels):
                     class_probabilities[scene_label] = probabilities[scene_id] / input_data.shape[0] 
@@ -1060,11 +1045,7 @@ def do_testing(db, scene_labels, folds, param, log, overwrite=False):
                 res.append(
                     res_data
                 )
-
                 processed_files.append(item.filename)
-
-            if not len(res):
-                raise ValueError('No results to save.')
 
             # Save results container
             fields = ['filename', 'scene_label']
@@ -1173,9 +1154,6 @@ def do_evaluation(db, folds, param, log, application_mode='default'):
     y_true_scene = {}
     y_pred_scene = {}
 
-    y_true_device = {}
-    y_pred_device = {}
-
     estimated_scene_items = {}
     for item in estimated_scene_list:
         estimated_scene_items[item.filename] = item
@@ -1203,31 +1181,12 @@ def do_evaluation(db, folds, param, log, application_mode='default'):
         y_true_scene[item.scene_label].append(scene_label_id)
         y_pred_scene[item.scene_label].append(item_probabilities)
 
-        if item.source_label not in y_true_device:
-            y_true_device[item.source_label] = []
-            y_pred_device[item.source_label] = []
-
-        y_true_device[item.source_label].append(scene_label_id)
-        y_pred_device[item.source_label].append(item_probabilities)
-
     from sklearn.metrics import log_loss
     logloss_overall = log_loss(y_true=y_true, y_pred=y_pred)
 
     logloss_class_wise = {}
     for scene_label in db.scene_labels():
-        logloss_class_wise[scene_label] = log_loss(
-            y_true=y_true_scene[scene_label],
-            y_pred=y_pred_scene[scene_label],
-            labels=list(range(len(db.scene_labels())))
-        )
-
-    logloss_device_wise = {}
-    for decice_label in list(y_true_device.keys()):
-        logloss_device_wise[decice_label] = log_loss(
-            y_true=y_true_device[decice_label],
-            y_pred=y_pred_device[decice_label],
-            labels=list(range(len(db.scene_labels())))
-        )
+        logloss_class_wise[scene_label] = log_loss(y_true=y_true_scene[scene_label], y_pred=y_pred_scene[scene_label], labels=list(range(len(db.scene_labels()))))
 
     results = evaluator.results()
     all_results.append(results)
@@ -1328,28 +1287,14 @@ def do_evaluation(db, folds, param, log, application_mode='default'):
     log.row_sep()
 
     # Last row
-    column_values = ['Accuracy']
+    column_values = ['Average']
     for value in overall:
         column_values.append(value*100.0)
-    column_values.append(' ')
+    column_values.append(logloss_overall)
 
     log.row(
         *column_values,
         types=column_types
-    )
-
-    column_values = ['Logloss', ' ']
-    column_types = ['str20', 'float3']
-    for device_label in devices:
-        column_values.append(logloss_device_wise[device_label])
-        column_types.append('float3')
-
-    column_values.append(logloss_overall)
-    column_types.append('float3')
-
-    log.row(
-        *column_values,
-        types=column_types,
     )
 
     log.line()
